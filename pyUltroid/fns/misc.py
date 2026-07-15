@@ -274,7 +274,7 @@ async def get_synonyms_or_antonyms(word, type_of_words):
 
 
 class Quotly:
-    _API = "https://quoteampi.onrender.com/generate"
+    _API = "https://quote.yuri.ly/generate"
     _entities = {
         types.MessageEntityPhone: "phone_number",
         types.MessageEntityMention: "mention",
@@ -377,7 +377,7 @@ class Quotly:
     async def create_quotly(
         self,
         event,
-        url="https://bot.lyo.su/quote/generate",
+        url="https://quote.yuri.ly/generate",
         reply={},
         bg=None,
         sender=None,
