@@ -279,6 +279,7 @@ class Quotly:
         types.MessageEntityPhone: "phone_number",
         types.MessageEntityMention: "mention",
         types.MessageEntityBold: "bold",
+        types.MessageEntityItalic: "italic",
         types.MessageEntityCashtag: "cashtag",
         types.MessageEntityStrike: "strikethrough",
         types.MessageEntityHashtag: "hashtag",
@@ -291,7 +292,96 @@ class Quotly:
         types.MessageEntityCode: "code",
         types.MessageEntityPre: "pre",
         types.MessageEntitySpoiler: "spoiler",
+        types.MessageEntityCustomEmoji: "custom_emoji",
     }
+
+    # Bot API 10.1 (June 11, 2026) RichText mapping
+    _rich_text_entities = {
+        types.MessageEntityBold: "richTextBold",
+        types.MessageEntityItalic: "richTextItalic",
+        types.MessageEntityUnderline: "richTextUnderline",
+        types.MessageEntityStrike: "richTextStrikethrough",
+        types.MessageEntitySpoiler: "richTextSpoiler",
+        types.MessageEntityCode: "richTextCode",
+        types.MessageEntityPre: "richTextCode",
+        types.MessageEntityUrl: "richTextUrl",
+        types.MessageEntityTextUrl: "richTextUrl",
+        types.MessageEntityEmail: "richTextEmailAddress",
+        types.MessageEntityPhone: "richTextPhoneNumber",
+        types.MessageEntityMention: "richTextMention",
+        types.MessageEntityMentionName: "richTextTextMention",
+        types.MessageEntityHashtag: "richTextHashtag",
+        types.MessageEntityCashtag: "richTextCashtag",
+        types.MessageEntityBotCommand: "richTextBotCommand",
+        types.MessageEntityCustomEmoji: "richTextCustomEmoji",
+    }
+
+    def _to_rich_text(self, text, entities):
+        """Convert a Telethon message + entities into a Bot API 10.1 RichText tree."""
+        if not text:
+            return {"type": "richTextPlain", "text": ""}
+
+        # Build active-entity-instance lists per UTF-16 code unit (Telethon offsets are UTF-16).
+        active = [[] for _ in range(len(text))]
+        for entity in entities or []:
+            entity_type = type(entity)
+            if entity_type in self._rich_text_entities:
+                for i in range(entity.offset, min(entity.offset + entity.length, len(text))):
+                    active[i].append(entity)
+
+        # Group consecutive characters with the same active-entity set.
+        groups = []
+        current_key = None
+        current_chars = []
+        for idx, char in enumerate(text):
+            # Sort entities by class+offset so the tuple is hashable/comparable.
+            char_entities = tuple(sorted(active[idx], key=lambda e: (type(e).__name__, e.offset, e.length)))
+            if char_entities != current_key:
+                if current_chars:
+                    groups.append((current_entities, "".join(current_chars)))
+                current_key = char_entities
+                current_entities = list(active[idx])
+                current_chars = [char]
+            else:
+                current_chars.append(char)
+        if current_chars:
+            groups.append((current_entities, "".join(current_chars)))
+
+        # Build tree nodes for each group.
+        def build_node(entity_instances, substring):
+            node = {"type": "richTextPlain", "text": substring}
+            if not entity_instances:
+                return node
+            # Sort for deterministic nesting order.
+            entity_instances = sorted(entity_instances, key=lambda e: self._rich_text_entities.get(type(e), "z"))
+            for entity in entity_instances:
+                rich_type = self._rich_text_entities.get(type(entity))
+                if not rich_type:
+                    continue
+                if rich_type == "richTextUrl":
+                    url = getattr(entity, "url", None)
+                    if not url and isinstance(entity, types.MessageEntityUrl):
+                        url = substring
+                    if url:
+                        node = {"type": rich_type, "text": node, "url": url}
+                        continue
+                if rich_type == "richTextTextMention":
+                    user_id = getattr(entity, "user_id", None)
+                    if user_id:
+                        node = {"type": rich_type, "text": node, "user": {"id": user_id}}
+                        continue
+                if rich_type == "richTextCustomEmoji":
+                    document_id = getattr(entity, "document_id", None)
+                    if document_id:
+                        node = {"type": rich_type, "text": node, "document_id": str(document_id)}
+                        continue
+                node = {"type": rich_type, "text": node}
+            return node
+
+        nodes = [build_node(entity_instances, substring) for entity_instances, substring in groups]
+        if len(nodes) == 1:
+            return nodes[0]
+        return {"type": "richText", "text": nodes}
 
     async def _format_quote(self, event, reply=None, sender=None, type_="private"):
         async def telegraph(file_):
@@ -367,6 +457,11 @@ class Quotly:
             "text": text,
             "replyMessage": reply,
         }
+        # Bot API 10.1 Rich Messages payload (optional, mirrors text+entities for new APIs)
+        try:
+            message["rich_text"] = self._to_rich_text(text, event.entities)
+        except Exception:
+            message["rich_text"] = {"type": "richTextPlain", "text": text or ""}
         if event.document and event.document.thumbs:
             file_ = await event.download_media(thumb=-1)
             uri = await telegraph(file_)

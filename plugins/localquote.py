@@ -123,72 +123,136 @@ async def local_quote(event):
             draw.text((current_x, current_y), "[Media Error]", fill=TEXT_COLOR, font=font_text)
             current_x += 100
 
-    # 2. Render Text with Full Formatting Entities
+    # 2. Render Text with Full Formatting Entities (Bot API 10.1 RichText aware)
     text = reply.message or ""
     entities = reply.entities or []
     line_height = 24
     start_text_x = current_x
+    max_text_y = bubble_y2 - pad
 
-    idx = 0
-    while idx < len(text):
-        char = text[idx]
+    def get_active_entities(idx):
+        return [ent for ent in entities if ent.offset <= idx < (ent.offset + ent.length)]
+
+    def entity_key(idx):
+        return tuple(sorted(
+            (type(ent).__name__, ent.offset, ent.length, getattr(ent, "document_id", 0), getattr(ent, "url", ""))
+            for ent in get_active_entities(idx)
+        ))
+
+    # Split text into homogeneous segments.
+    segments = []
+    if text:
+        seg_chars = [text[0]]
+        seg_key = entity_key(0)
+        for idx in range(1, len(text)):
+            if entity_key(idx) == seg_key:
+                seg_chars.append(text[idx])
+            else:
+                segments.append(("".join(seg_chars), get_active_entities(idx - 1)))
+                seg_chars = [text[idx]]
+                seg_key = entity_key(idx)
+        segments.append(("".join(seg_chars), get_active_entities(len(text) - 1)))
+
+    async def render_segment(seg_text, seg_entities):
+        nonlocal current_x, current_y
+        if not seg_text:
+            return
+
+        # Determine segment font and decoration.
         active_font = font_text
-        custom_emoji_doc = None
-        is_strikethrough = False
-        is_underline = False
-        
-        for ent in entities:
-            if ent.offset <= idx < (ent.offset + ent.length):
-                if isinstance(ent, MessageEntityBold):
-                    active_font = font_bold
-                elif isinstance(ent, MessageEntityItalic):
-                    active_font = font_italic
-                elif isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                    active_font = font_mono
-                elif isinstance(ent, MessageEntityStrike):
-                    is_strikethrough = True
-                elif isinstance(ent, MessageEntityUnderline):
-                    is_underline = True
-                elif isinstance(ent, MessageEntityCustomEmoji):
-                    custom_emoji_doc = ent.document_id
-                    break
+        is_bold = any(isinstance(ent, MessageEntityBold) for ent in seg_entities)
+        is_italic = any(isinstance(ent, MessageEntityItalic) for ent in seg_entities)
+        is_mono = any(isinstance(ent, (MessageEntityCode, MessageEntityPre)) for ent in seg_entities)
+        is_underline = any(isinstance(ent, MessageEntityUnderline) for ent in seg_entities)
+        is_strikethrough = any(isinstance(ent, MessageEntityStrike) for ent in seg_entities)
+        custom_emoji = next((ent.document_id for ent in seg_entities if isinstance(ent, MessageEntityCustomEmoji)), None)
 
-        if custom_emoji_doc:
+        if is_mono:
+            active_font = font_mono
+        elif is_bold and is_italic:
+            active_font = font_italic  # Fallback; could use a bold-italic font if available.
+        elif is_bold:
+            active_font = font_bold
+        elif is_italic:
+            active_font = font_italic
+
+        # Custom emoji: render as image and skip text drawing.
+        if custom_emoji:
             try:
-                emoji_file = await event.client.download_media(custom_emoji_doc)
+                emoji_file = await event.client.download_media(custom_emoji)
                 if emoji_file and os.path.exists(emoji_file):
                     with Image.open(emoji_file) as emoji_img:
                         emoji_img = emoji_img.resize((20, 20)).convert("RGBA")
                         img.paste(emoji_img, (current_x, current_y), emoji_img)
                     os.remove(emoji_file)
-                current_x += 22
+                    current_x += 22
             except Exception:
+                draw.text((current_x, current_y), "\u25a1", fill=TEXT_COLOR, font=font_text)
                 current_x += 10
-            idx += ent.length
-            continue
-        
-        # Calculate character size
-        char_w = draw.textlength(char, font=active_font) if hasattr(draw, "textlength") else 10
-        char_h = 16 # approximate font height
+            return
 
-        # Draw character
-        draw.text((current_x, current_y), char, fill=TEXT_COLOR, font=active_font)
-        
-        # Draw underline
+        # Word-wrap the segment if it exceeds the remaining bubble width.
+        seg_width = draw.textlength(seg_text, font=active_font) if hasattr(draw, "textlength") else len(seg_text) * 8
+        max_width = bubble_x2 - pad - current_x
+
+        if seg_width > max_width and max_width > 20:
+            # Greedy word wrap.
+            words = seg_text.split(" ")
+            line = ""
+            for word in words:
+                test = line + (" " if line else "") + word
+                test_w = draw.textlength(test, font=active_font) if hasattr(draw, "textlength") else len(test) * 8
+                if test_w <= max_width:
+                    line = test
+                else:
+                    if line:
+                        draw.text((current_x, current_y), line, fill=TEXT_COLOR, font=active_font)
+                        _draw_decorations(draw, current_x, current_y, line, active_font, is_underline, is_strikethrough)
+                        current_x = start_text_x
+                        current_y += line_height
+                        if current_y > max_text_y:
+                            return
+                    # If a single word is too long, character-wrap it.
+                    if draw.textlength(word, font=active_font) > max_width:
+                        for char in word:
+                            cw = draw.textlength(char, font=active_font) if hasattr(draw, "textlength") else 8
+                            if current_x + cw > bubble_x2 - pad:
+                                current_x = start_text_x
+                                current_y += line_height
+                                if current_y > max_text_y:
+                                    return
+                            draw.text((current_x, current_y), char, fill=TEXT_COLOR, font=active_font)
+                            current_x += int(cw)
+                        line = ""
+                    else:
+                        line = word
+            if line:
+                draw.text((current_x, current_y), line, fill=TEXT_COLOR, font=active_font)
+                _draw_decorations(draw, current_x, current_y, line, active_font, is_underline, is_strikethrough)
+                current_x += int(draw.textlength(line, font=active_font) if hasattr(draw, "textlength") else len(line) * 8)
+        else:
+            # Newline on explicit overflow boundary.
+            if current_x + seg_width > bubble_x2 - pad and current_x != start_text_x:
+                current_x = start_text_x
+                current_y += line_height
+                if current_y > max_text_y:
+                    return
+            draw.text((current_x, current_y), seg_text, fill=TEXT_COLOR, font=active_font)
+            _draw_decorations(draw, current_x, current_y, seg_text, active_font, is_underline, is_strikethrough)
+            current_x += int(seg_width)
+
+    def _draw_decorations(draw, x, y, seg_text, active_font, is_underline, is_strikethrough):
+        seg_w = draw.textlength(seg_text, font=active_font) if hasattr(draw, "textlength") else len(seg_text) * 8
+        char_h = 16
         if is_underline:
-            draw.line([(current_x, current_y + char_h + 2), (current_x + char_w, current_y + char_h + 2)], fill=TEXT_COLOR, width=1)
-            
-        # Draw strikethrough
+            draw.line([(x, y + char_h + 2), (x + seg_w, y + char_h + 2)], fill=TEXT_COLOR, width=1)
         if is_strikethrough:
-            draw.line([(current_x, current_y + (char_h // 2) + 2), (current_x + char_w, current_y + (char_h // 2) + 2)], fill=TEXT_COLOR, width=1)
+            draw.line([(x, y + (char_h // 2) + 2), (x + seg_w, y + (char_h // 2) + 2)], fill=TEXT_COLOR, width=1)
 
-        current_x += int(char_w)
-        
-        if current_x > bubble_x2 - pad:
-            current_x = start_text_x
-            current_y += line_height
-
-        idx += 1
+    for seg_text, seg_entities in segments:
+        if current_y > max_text_y:
+            break
+        await render_segment(seg_text, seg_entities)
 
     sticker_path = "local_quote.webp"
     img.save(sticker_path, "WEBP")
