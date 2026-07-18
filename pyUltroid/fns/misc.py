@@ -457,11 +457,9 @@ class Quotly:
             "text": text,
             "replyMessage": reply,
         }
-        # Bot API 10.1 Rich Messages payload (optional, mirrors text+entities for new APIs)
-        try:
-            message["rich_text"] = self._to_rich_text(text, event.entities)
-        except Exception:
-            message["rich_text"] = {"type": "richTextPlain", "text": text or ""}
+        # NOTE: Bot API 10.1 RichText conversion is kept as a helper below
+        # but not sent to the legacy quote API, since quote.yuri.ly expects
+        # classic MessageEntity entities.
         if event.document and event.document.thumbs:
             file_ = await event.download_media(thumb=-1)
             uri = await telegraph(file_)
