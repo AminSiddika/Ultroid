@@ -47,8 +47,12 @@ async def get_font(font_path, size):
 async def local_quote(event):
     input_text = event.pattern_match.group(1).strip().lower()
     reply = await event.get_reply_message()
-    if not reply or not reply.message:
-        return await event.eor("Reply to a text message to create a local quote sticker.")
+    if not reply:
+        return await event.eor("Reply message not found (reply is None). Please reply to a message.")
+    if not reply.message:
+        # If it's a media message without caption, reply.message might be empty
+        # Let's show debug information to see what it is
+        return await event.eor(f"Reply message has no text. Media type: {type(reply.media) if reply.media else 'No Media'}")
 
     msg = await event.eor("`Processing local quote...`")
     
