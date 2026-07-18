@@ -47,7 +47,7 @@ async def get_font(font_path, size):
 async def local_quote(event):
     input_text = event.pattern_match.group(1).strip().lower()
     reply = await event.get_reply_message()
-    if not reply or not reply.text:
+    if not reply or not reply.message:
         return await event.eor("Reply to a text message to create a local quote sticker.")
 
     msg = await event.eor("`Processing local quote...`")
@@ -89,7 +89,7 @@ async def local_quote(event):
 
     draw.text((bubble_x1 + pad, bubble_y1 + pad), sender_name, fill=NAME_COLOR, font=font_name)
 
-    text = reply.text
+    text = reply.message
     entities = reply.entities or []
     current_x = bubble_x1 + pad
     current_y = bubble_y1 + pad + 25
