@@ -11,7 +11,6 @@ Render local quote stickers with custom fonts, formats, and Telegram rich text e
 
 import os
 import io
-import random
 from telethon import events
 from telethon.tl.types import (
     MessageEntityBold,
@@ -34,21 +33,8 @@ NAME_COLOR = (82, 178, 253, 255)
 FONT_DIR = "/data/data/com.termux/files/home/Ultroid/resources/fonts"
 os.makedirs(FONT_DIR, exist_ok=True)
 
-FONT_REGULAR = os.path.join(FONT_DIR, "DejaVuSans.ttf")
-FONT_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
-FONT_ITALIC = os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf")
-
 
 async def get_font(font_path, size):
-    # Try downloading DejaVuSans fonts if they don't exist locally
-    if not os.path.exists(font_path):
-        import urllib.request
-        filename = os.path.basename(font_path)
-        url = f"https://github.com/dejavu-fonts/dejavu-fonts/raw/master/resources/{filename}"
-        try:
-            urllib.request.urlretrieve(url, font_path)
-        except Exception:
-            pass
     if os.path.exists(font_path):
         try:
             return ImageFont.truetype(font_path, size)
@@ -57,8 +43,9 @@ async def get_font(font_path, size):
     return ImageFont.load_default()
 
 
-@ultroid_cmd(pattern="localq$")
+@ultroid_cmd(pattern="localq( (.*)|$)")
 async def local_quote(event):
+    input_text = event.pattern_match.group(1).strip().lower()
     reply = await event.get_reply_message()
     if not reply or not reply.text:
         return await event.eor("Reply to a text message to create a local quote sticker.")
@@ -69,16 +56,26 @@ async def local_quote(event):
     sender_name = (getattr(sender, 'first_name', '') or '') + ' ' + (getattr(sender, 'last_name', '') or '')
     sender_name = sender_name.strip() or "User"
 
+    # Select Font Family
+    if "miller" in input_text:
+        font_reg_path = os.path.join(FONT_DIR, "Miller Banner Roman.ttf")
+        font_bold_path = os.path.join(FONT_DIR, "Miller Banner Bold.ttf")
+        font_italic_path = os.path.join(FONT_DIR, "Miller Banner Italic.ttf")
+    else:
+        font_reg_path = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+        font_bold_path = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+        font_italic_path = os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf")
+
     # Set canvas size
     canvas_w, canvas_h = 512, 256
     img = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     # Load Fonts
-    font_name = await get_font(FONT_BOLD, 18)
-    font_text = await get_font(FONT_REGULAR, 16)
-    font_italic = await get_font(FONT_ITALIC, 16)
-    font_bold = await get_font(FONT_BOLD, 16)
+    font_name = await get_font(font_bold_path, 18)
+    font_text = await get_font(font_reg_path, 16)
+    font_italic = await get_font(font_italic_path, 16)
+    font_bold = await get_font(font_bold_path, 16)
 
     pad = 15
     bubble_x1, bubble_y1 = 10, 10
