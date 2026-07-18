@@ -15,21 +15,21 @@
     Options can be combined in any order:
     - `r` or `reply`        : quote the message your reply is replying to
     - `anon`                : hide avatar and name
-    - `light` / `black`     : theme
+    - `light` / `black` / `purple` : theme
+    - `split` / `modern`    : two-bubble chat-style layout
     - `red`, `blue`, ...    : accent color
-    - `gradient c1-c2`      : gradient background (hex or names, e.g. #ff0000-blue)
-    - `size=NN`             : font size (e.g. size=20)
+    - `gradient c1-c2`      : gradient background
+    - `size=NN`             : font size
     - `N` (number 1-20)     : quote multiple messages
 
 Examples:
+    `{i}cq split purple`
     `{i}cq 5`
     `{i}cq light red gradient blue-cyan size=22 anon`
-    `{i}customq r black gradient #1a1a1a-#000000`
 """
 
 import os
 import re
-import io
 from telethon.tl.types import (
     MessageEntityBold,
     MessageEntityItalic,
@@ -92,6 +92,17 @@ THEMES = {
         "reply_text": (180, 180, 180, 255),
         "time": (180, 180, 180, 255),
         "shadow": (0, 0, 0, 0),
+    },
+    "purple": {
+        "bg": (0, 0, 0, 0),
+        "bubble": (40, 25, 55, 255),
+        "text": (255, 255, 255, 255),
+        "name": (100, 255, 220, 255),
+        "reply_bar": (100, 255, 220, 255),
+        "reply_name": (255, 255, 255, 255),
+        "reply_text": (180, 170, 190, 255),
+        "time": (180, 170, 190, 255),
+        "shadow": (0, 0, 0, 100),
     },
 }
 
@@ -167,7 +178,6 @@ def _circle_avatar(photo_path, size):
 
 
 def _gradient_background(w, h, color1, color2):
-    """Create a vertical RGBA gradient between two (r,g,b) colors."""
     base = Image.new("RGBA", (w, h), color1 + (255,))
     draw = ImageDraw.Draw(base)
     r1, g1, b1 = color1
@@ -182,7 +192,6 @@ def _gradient_background(w, h, color1, color2):
 
 
 def _draw_bubble_shadow(draw, img, x1, y1, x2, y2, radius, color):
-    """Draw a soft shadow under the bubble."""
     if color[3] == 0:
         return
     shadow = Image.new("RGBA", (x2 - x1 + 20, y2 - y1 + 20), (0, 0, 0, 0))
@@ -367,7 +376,6 @@ async def _render_rich_text(
 
 # ---------- Media preview ----------
 async def _get_media_preview(client, message, max_w, max_h):
-    """Download and return a resized media preview image, or None."""
     if not message.media:
         return None
     try:
@@ -383,7 +391,7 @@ async def _get_media_preview(client, message, max_w, max_h):
         return None
 
 
-# ---------- Bubble drawing ----------
+# ---------- Default bubble drawing ----------
 async def _draw_quote_bubble(
     img,
     draw,
@@ -398,7 +406,6 @@ async def _draw_quote_bubble(
     anonymous=False,
     show_media=True,
 ):
-    """Draw one message bubble. Returns new y position."""
     pad = 20
     bubble_radius = 18
     avatar_size = 52
@@ -410,7 +417,6 @@ async def _draw_quote_bubble(
     ).strip() or "User"
     user_color = theme["name"]
 
-    # Avatar
     avatar = None
     if not anonymous:
         try:
@@ -427,7 +433,6 @@ async def _draw_quote_bubble(
     content_y = y + 4
     text_max_w = max_width - (content_x - x) - pad
 
-    # Reply context
     reply_name = "User"
     reply_text = ""
     reply_h = 0
@@ -445,17 +450,14 @@ async def _draw_quote_bubble(
             reply_text = reply_text[:77] + "..."
         reply_h = fonts["regular"].size * 2 + 16
 
-    # Media preview
     media_img = None
     media_h = 0
-    media_w = 0
     if show_media and message.media:
         media_img = await _get_media_preview(client, message, text_max_w, 200)
         if media_img:
-            media_w, media_h = media_img.size
+            _, media_h = media_img.size
             media_h += 8
 
-    # Measure text
     text_y = content_y + fonts["bold"].size + 6
     if not anonymous:
         text_y = content_y + fonts["bold"].size + 6
@@ -475,24 +477,21 @@ async def _draw_quote_bubble(
         dry_run=True,
     )
 
-    content_h = final_y - content_y + pad + media_h + 30  # +30 for time label
-    content_h = max(content_h, 90)  # minimum bubble height
+    content_h = final_y - content_y + pad + media_h + 30
+    content_h = max(content_h, 90)
     bubble_x1 = content_x - pad // 2
     bubble_y1 = content_y - pad // 2
     bubble_x2 = content_x + text_max_w + pad
     bubble_y2 = bubble_y1 + content_h
 
-    # Shadow
     _draw_bubble_shadow(draw, img, bubble_x1, bubble_y1, bubble_x2, bubble_y2, bubble_radius, theme["shadow"])
 
-    # Bubble
     draw.rounded_rectangle(
         [bubble_x1, bubble_y1, bubble_x2, bubble_y2],
         radius=bubble_radius,
         fill=theme["bubble"],
     )
 
-    # Avatar
     if anonymous:
         pass
     elif avatar:
@@ -505,7 +504,6 @@ async def _draw_quote_bubble(
         img.paste(fallback, (avatar_x, avatar_y), fmask)
         draw.text((avatar_x + 16, avatar_y + 16), name[:1].upper(), fill=(255, 255, 255, 255), font=fonts["bold"])
 
-    # Name (truncate if too long)
     if not anonymous:
         name_w = _segment_width(name, fonts["bold"], draw)
         avail_w = bubble_x2 - content_x - pad - 50
@@ -518,7 +516,6 @@ async def _draw_quote_bubble(
     else:
         text_y = content_y
 
-    # Reply context
     if reply_msg:
         bar_x = content_x
         bar_y = text_y
@@ -527,12 +524,10 @@ async def _draw_quote_bubble(
         draw.text((bar_x + 10, bar_y + fonts["bold"].size + 4), reply_text, fill=theme["reply_text"], font=fonts["regular"])
         text_y += reply_h + 6
 
-    # Media preview
     if media_img:
         img.paste(media_img, (content_x, text_y), media_img)
         text_y += media_h
 
-    # Main rich text
     await _render_rich_text(
         img, draw,
         message.raw_text or message.message or "",
@@ -544,12 +539,160 @@ async def _draw_quote_bubble(
         dry_run=False,
     )
 
-    # Time
     time_text = "{}:{:02d}".format(message.date.hour, message.date.minute)
     time_w = _segment_width(time_text, fonts["regular"], draw)
     draw.text((bubble_x2 - time_w - 10, bubble_y2 - 22), time_text, fill=theme["time"], font=fonts["regular"])
 
     return bubble_y2 + 15
+
+
+# ---------- Split / modern chat style ----------
+async def _draw_split_quote(
+    img,
+    draw,
+    message,
+    reply_msg,
+    theme,
+    fonts,
+    client,
+    x,
+    y,
+    max_width,
+    anonymous=False,
+):
+    """Two-bubble layout: original on left, reply/main on right, avatar in middle."""
+    pad = 14
+    bubble_radius = 16
+    avatar_size = 58
+
+    left_w = 170
+    gap = avatar_size + 10
+    right_w = max_width - left_w - gap
+
+    left_msg = reply_msg or message
+    right_msg = message
+
+    left_sender = await left_msg.get_sender()
+    left_name = "{} {}".format(
+        getattr(left_sender, "first_name", "") or "",
+        getattr(left_sender, "last_name", "") or "",
+    ).strip() or "User"
+
+    right_sender = await right_msg.get_sender()
+    right_name = "{} {}".format(
+        getattr(right_sender, "first_name", "") or "",
+        getattr(right_sender, "last_name", "") or "",
+    ).strip() or "User"
+
+    avatar = None
+    if not anonymous:
+        try:
+            photo = await client.download_profile_photo(right_sender, file="quote_avatar_split.png")
+            if photo and os.path.exists(photo):
+                avatar = _circle_avatar(photo, avatar_size)
+                os.remove(photo)
+        except Exception:
+            pass
+
+    left_x = x
+    right_x = x + left_w + gap
+
+    left_text_y = y + 6 + fonts["bold"].size + 6
+    _, left_final_y = await _render_rich_text(
+        img, draw,
+        left_msg.raw_text or left_msg.message or "",
+        left_msg.entities,
+        left_x + 10, left_text_y,
+        left_w - 20, 300,
+        fonts, theme["text"],
+        client,
+        dry_run=True,
+    )
+    left_h = max(left_final_y - y + pad, 80)
+
+    right_text_y = y + 6 + fonts["bold"].size + 6
+    _, right_final_y = await _render_rich_text(
+        img, draw,
+        right_msg.raw_text or right_msg.message or "",
+        right_msg.entities,
+        right_x + 10, right_text_y,
+        right_w - 20, 500,
+        fonts, theme["text"],
+        client,
+        dry_run=True,
+    )
+    right_h = max(right_final_y - y + pad + 30, 100)
+
+    bubble_h = max(left_h, right_h)
+
+    left_color = theme["bubble"]
+    right_color = tuple(min(255, c + 12) for c in theme["bubble"][:3]) + (theme["bubble"][3],)
+
+    _draw_bubble_shadow(draw, img, left_x, y, left_x + left_w, y + bubble_h, bubble_radius, theme["shadow"])
+    _draw_bubble_shadow(draw, img, right_x, y, right_x + right_w, y + bubble_h, bubble_radius, theme["shadow"])
+
+    draw.rounded_rectangle([left_x, y, left_x + left_w, y + bubble_h], radius=bubble_radius, fill=left_color)
+    draw.rounded_rectangle([right_x, y, right_x + right_w, y + bubble_h], radius=bubble_radius, fill=right_color)
+
+    avatar_x = left_x + left_w + (gap - avatar_size) // 2
+    avatar_y = y + (bubble_h - avatar_size) // 2
+    if avatar:
+        img.paste(avatar, (avatar_x, avatar_y), avatar)
+    else:
+        fallback = Image.new("RGBA", (avatar_size, avatar_size), (80, 80, 80, 255))
+        fmask = Image.new("L", (avatar_size, avatar_size), 0)
+        fdraw = ImageDraw.Draw(fmask)
+        fdraw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+        img.paste(fallback, (avatar_x, avatar_y), fmask)
+        if not anonymous:
+            draw.text((avatar_x + 16, avatar_y + 16), right_name[:1].upper(), fill=(255, 255, 255, 255), font=fonts["bold"])
+
+    # Left name
+    avail = left_w - 20
+    if _segment_width(left_name, fonts["bold"], draw) > avail:
+        while left_name and _segment_width(left_name + "...", fonts["bold"], draw) > avail:
+            left_name = left_name[:-1]
+        left_name += "..."
+    draw.text((left_x + 10, y + 6), left_name, fill=theme["name"], font=fonts["bold"])
+
+    # Left text
+    await _render_rich_text(
+        img, draw,
+        left_msg.raw_text or left_msg.message or "",
+        left_msg.entities,
+        left_x + 10, left_text_y,
+        left_w - 20, bubble_h - (left_text_y - y) - pad,
+        fonts, theme["text"],
+        client,
+        dry_run=False,
+    )
+
+    # Right name
+    avail = right_w - 20 - 50
+    if _segment_width(right_name, fonts["bold"], draw) > avail:
+        while right_name and _segment_width(right_name + "...", fonts["bold"], draw) > avail:
+            right_name = right_name[:-1]
+        right_name += "..."
+    draw.text((right_x + 10, y + 6), right_name, fill=theme["name"], font=fonts["bold"])
+
+    # Right text
+    await _render_rich_text(
+        img, draw,
+        right_msg.raw_text or right_msg.message or "",
+        right_msg.entities,
+        right_x + 10, right_text_y,
+        right_w - 20, bubble_h - (right_text_y - y) - pad - 25,
+        fonts, theme["text"],
+        client,
+        dry_run=False,
+    )
+
+    # Time on right bubble
+    time_text = "{}:{:02d}".format(right_msg.date.hour, right_msg.date.minute)
+    time_w = _segment_width(time_text, fonts["regular"], draw)
+    draw.text((right_x + right_w - time_w - 10, y + bubble_h - 22), time_text, fill=theme["time"], font=fonts["regular"])
+
+    return y + bubble_h + 15
 
 
 # ---------- Argument parser ----------
@@ -563,6 +706,7 @@ def _parse_args(match):
         "gradient": None,
         "font_size": 24,
         "show_media": True,
+        "style": "default",
     }
     if not match:
         return opts
@@ -590,6 +734,9 @@ def _parse_args(match):
         if token in COLORS:
             opts["accent"] = token
             continue
+        if token in ("split", "modern", "chat"):
+            opts["style"] = "split"
+            continue
         m = re.match(r"size=(\d{1,3})", token)
         if m:
             opts["font_size"] = max(10, min(72, int(m.group(1))))
@@ -612,7 +759,6 @@ def _parse_args(match):
             continue
         remaining.append(token)
 
-    # Also accept plain "gradient red-blue" format
     if not opts["gradient"]:
         for i, token in enumerate(remaining):
             if token == "gradient" and i + 1 < len(remaining):
@@ -676,17 +822,28 @@ async def custom_quote(event):
     y = 40
     for idx, message in enumerate(messages):
         ctx = reply_context if idx == 0 else None
-        y = await _draw_quote_bubble(
-            img, draw,
-            message, ctx,
-            theme, fonts,
-            event.client,
-            20, y,
-            canvas_w - 40,
-            anonymous=opts["anonymous"],
-            show_media=opts["show_media"],
-        )
-        if y > canvas_h - 100:
+        if opts["style"] == "split":
+            y = await _draw_split_quote(
+                img, draw,
+                message, ctx,
+                theme, fonts,
+                event.client,
+                20, y,
+                canvas_w - 40,
+                anonymous=opts["anonymous"],
+            )
+        else:
+            y = await _draw_quote_bubble(
+                img, draw,
+                message, ctx,
+                theme, fonts,
+                event.client,
+                20, y,
+                canvas_w - 40,
+                anonymous=opts["anonymous"],
+                show_media=opts["show_media"],
+            )
+        if y > canvas_h - 60:
             break
 
     # Scale down if content overflows
@@ -695,7 +852,6 @@ async def custom_quote(event):
         new_w = int(canvas_w * scale)
         new_h = int(canvas_h * scale)
         img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        # Center on a new canvas
         final = Image.new("RGBA", (canvas_w, canvas_h), theme["bg"])
         final.paste(img, ((canvas_w - new_w) // 2, (canvas_h - new_h) // 2), img)
         img = final
