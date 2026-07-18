@@ -475,7 +475,8 @@ async def _draw_quote_bubble(
         dry_run=True,
     )
 
-    content_h = final_y - content_y + pad + media_h
+    content_h = final_y - content_y + pad + media_h + 30  # +30 for time label
+    content_h = max(content_h, 90)  # minimum bubble height
     bubble_x1 = content_x - pad // 2
     bubble_y1 = content_y - pad // 2
     bubble_x2 = content_x + text_max_w + pad
@@ -504,8 +505,14 @@ async def _draw_quote_bubble(
         img.paste(fallback, (avatar_x, avatar_y), fmask)
         draw.text((avatar_x + 16, avatar_y + 16), name[:1].upper(), fill=(255, 255, 255, 255), font=fonts["bold"])
 
-    # Name
+    # Name (truncate if too long)
     if not anonymous:
+        name_w = _segment_width(name, fonts["bold"], draw)
+        avail_w = bubble_x2 - content_x - pad - 50
+        if name_w > avail_w:
+            while name and _segment_width(name + "...", fonts["bold"], draw) > avail_w:
+                name = name[:-1]
+            name = name + "..."
         draw.text((content_x, content_y), name, fill=user_color, font=fonts["bold"])
         text_y = content_y + fonts["bold"].size + 6
     else:
