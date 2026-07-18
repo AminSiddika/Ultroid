@@ -56,7 +56,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from . import ultroid_cmd
 
 # ---------- Config ----------
-FONT_DIR = "/data/data/com.termux/files/home/Ultroid/resources/fonts"
+FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "fonts")
 STICKER_PATH = "custom_quote.webp"
 
 THEMES = {

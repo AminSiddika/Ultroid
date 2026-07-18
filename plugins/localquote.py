@@ -33,7 +33,7 @@ TEXT_COLOR = (255, 255, 255, 255)
 NAME_COLOR = (82, 178, 253, 255)
 
 # Setup font paths
-FONT_DIR = "/data/data/com.termux/files/home/Ultroid/resources/fonts"
+FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "fonts")
 os.makedirs(FONT_DIR, exist_ok=True)
 
 
