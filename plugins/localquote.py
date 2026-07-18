@@ -16,6 +16,7 @@ from telethon.tl.types import (
     MessageEntityBold,
     MessageEntityItalic,
     MessageEntityCode,
+    MessageEntityPre,
     MessageEntityStrike,
     MessageEntityUnderline,
     MessageEntityCustomEmoji,
@@ -68,9 +69,10 @@ async def local_quote(event):
         font_bold_path = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
         font_italic_path = os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf")
 
+    font_mono_path = os.path.join(FONT_DIR, "DroidSansMono.ttf")
+
     # Dimensions & Setup
     canvas_w = 512
-    # Dynamic height calculation
     has_media = reply.media and (isinstance(reply.media, MessageMediaPhoto) or isinstance(reply.media, MessageMediaDocument))
     canvas_h = 320 if has_media else 200
     
@@ -82,6 +84,7 @@ async def local_quote(event):
     font_text = await get_font(font_reg_path, 16)
     font_italic = await get_font(font_italic_path, 16)
     font_bold = await get_font(font_bold_path, 16)
+    font_mono = await get_font(font_mono_path, 14)
 
     pad = 15
     bubble_x1, bubble_y1 = 10, 10
@@ -101,31 +104,26 @@ async def local_quote(event):
     current_x = bubble_x1 + pad
     current_y = bubble_y1 + pad + 25
 
-    # 1. If message contains media (like a sticker or photo)
+    # 1. Media handling (Stickers/Photos)
     if has_media:
         try:
             media_file = await event.client.download_media(reply)
             if media_file and os.path.exists(media_file):
                 with Image.open(media_file) as media_img:
-                    # Resize media to fit in the quote bubble
                     max_w, max_h = 180, 180
                     media_img.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
                     media_w, media_h = media_img.size
                     
-                    # Convert to RGBA
                     media_img = media_img.convert("RGBA")
-                    # Paste inside bubble
                     img.paste(media_img, (current_x, current_y), media_img)
                     
-                    # Shift text start x-coordinate to the right of the media
                     current_x += media_w + 15
                 os.remove(media_file)
-        except Exception as e:
-            # Fallback if media download/processing fails
+        except Exception:
             draw.text((current_x, current_y), "[Media Error]", fill=TEXT_COLOR, font=font_text)
             current_x += 100
 
-    # 2. Render Text
+    # 2. Render Text with Full Formatting Entities
     text = reply.message or ""
     entities = reply.entities or []
     line_height = 24
@@ -136,6 +134,8 @@ async def local_quote(event):
         char = text[idx]
         active_font = font_text
         custom_emoji_doc = None
+        is_strikethrough = False
+        is_underline = False
         
         for ent in entities:
             if ent.offset <= idx < (ent.offset + ent.length):
@@ -143,6 +143,12 @@ async def local_quote(event):
                     active_font = font_bold
                 elif isinstance(ent, MessageEntityItalic):
                     active_font = font_italic
+                elif isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                    active_font = font_mono
+                elif isinstance(ent, MessageEntityStrike):
+                    is_strikethrough = True
+                elif isinstance(ent, MessageEntityUnderline):
+                    is_underline = True
                 elif isinstance(ent, MessageEntityCustomEmoji):
                     custom_emoji_doc = ent.document_id
                     break
@@ -161,9 +167,21 @@ async def local_quote(event):
             idx += ent.length
             continue
         
+        # Calculate character size
+        char_w = draw.textlength(char, font=active_font) if hasattr(draw, "textlength") else 10
+        char_h = 16 # approximate font height
+
+        # Draw character
         draw.text((current_x, current_y), char, fill=TEXT_COLOR, font=active_font)
         
-        char_w = draw.textlength(char, font=active_font) if hasattr(draw, "textlength") else 10
+        # Draw underline
+        if is_underline:
+            draw.line([(current_x, current_y + char_h + 2), (current_x + char_w, current_y + char_h + 2)], fill=TEXT_COLOR, width=1)
+            
+        # Draw strikethrough
+        if is_strikethrough:
+            draw.line([(current_x, current_y + (char_h // 2) + 2), (current_x + char_w, current_y + (char_h // 2) + 2)], fill=TEXT_COLOR, width=1)
+
         current_x += int(char_w)
         
         if current_x > bubble_x2 - pad:
